@@ -191,10 +191,10 @@ class AsyncWemo(AbstractWemo):
         except Exception:
             return await self.status()
 
-    async def off(self):
+    async def off(self) -> bool:
         """Try turn plug off, return plug status."""
         try:
-            self._status(await self._send('Set', 'BinaryState', 0))
+            return self._status(await self._send('Set', 'BinaryState', '0'))
         except Exception:
             return await self.status()
 
@@ -230,7 +230,7 @@ class AsyncWemo(AbstractWemo):
                 return self._handle_response(response, obj)
         raise Exception('ConnectionErrorAllPorts')
 
-    async def _make_request(self, url, headers, data, timeout):
+    async def _make_request(self, url, headers, data, timeout) -> httpx.Response:  # noqa:E501
         async with httpx.AsyncClient() as client:
             return await client.post(
                 url,

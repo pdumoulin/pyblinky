@@ -2,12 +2,13 @@
 
 import re
 import time
+from abc import ABC
 
 import httpx
 
 
-class Wemo:
-    """Instance of plug."""
+class AbstractWemo(ABC):
+    """Base abstract plug."""
 
     URL_TMPL = 'http://{ip}:{port}/upnp/control/basicevent1'
     HEADER_TMPL = '"urn:Belkin:service:basicevent:1#{method}{obj}"'
@@ -38,47 +39,9 @@ class Wemo:
         self.timeout = timeout
         self.ports = [49153, 49152, 49154, 49151, 49155]
 
-        self._name = None
+        self._name = ''
         self._name_cache_age = name_cache_age
         self._name_last_update = 0
-
-    def toggle(self) -> None:
-        """Toggle plug status and return state."""
-        if self.status():
-            self.off()
-        else:
-            self.on()
-
-    def burst(self, seconds: int) -> None:
-        """Turn plug on, wait, turn off."""
-        if not self.status():
-            self.on()
-            time.sleep(seconds)
-            self.off()
-
-    def on(self) -> bool:
-        """Try turn plug on, return plug status."""
-        try:
-            return self._status(self._send('Set', 'BinaryState', 1))
-        except Exception:
-            return self.status()
-
-    def off(self) -> bool:
-        """Try turn plug off, return plug status."""
-        try:
-            return self._status(self._send('Set', 'BinaryState', 0))
-        except Exception:
-            return self.status()
-
-    def status(self) -> bool:
-        """Get plug status."""
-        return self._status(self._send('Get', 'BinaryState'))
-
-    def identify(self) -> str:
-        """Get plug name."""
-        if self._query_identify():
-            self._cache_identify(self._send('Get', 'FriendlyName'))
-        return self._name
 
     def _query_identify(self) -> bool:
         """Determine if cache should be read."""
@@ -93,14 +56,9 @@ class Wemo:
 
     def _cache_identify(self, name: str) -> None:
         self._name = name
-        self._name_last_update = time.time()
+        self._name_last_update = int(time.time())
 
-    def rename(self, name: str) -> str:
-        """Update plug name."""
-        self._cache_identify(self._send('Change', 'FriendlyName', name))
-        return self._name
-
-    def _status(self, status: str) -> bool | str:
+    def _status(self, status: str) -> bool:
         if '|' in status:
             status = status.split('|')[0]
         if status in ['1', '8']:
@@ -108,23 +66,6 @@ class Wemo:
         if status in ['0']:
             return False
         raise Exception('UnknownStatus "%s"' % status)
-
-    def _send(self, method: str, obj: str, param: str = None) -> str:
-        for port in self.ports:
-            try:
-                response = self._make_request(
-                    *self._request_params(
-                        method,
-                        obj,
-                        port,
-                        param
-                    )
-                )
-            except (httpx.ConnectError, httpx.HTTPStatusError):
-                pass
-            else:
-                return self._handle_response(response, obj)
-        raise Exception('ConnectionErrorAllPorts')
 
     def _request_params(self, method: str, obj: str, port: int, param: str) -> tuple:  # noqa:E501
         return (
@@ -144,7 +85,7 @@ class Wemo:
             response.text
         )
         if match:
-            port = response.url.port
+            port = int(str(response.url.port))
 
             # prioritize port that worked
             if self.ports[0] != port:
@@ -153,16 +94,80 @@ class Wemo:
             return match.group(1)
         raise Exception('UnparsableResponse')
 
+
+class Wemo(AbstractWemo):
+    """Synchronous instance of plug."""
+
+    def toggle(self) -> None:
+        """Toggle plug status and return state."""
+        if self.status():
+            self.off()
+        else:
+            self.on()
+
+    def burst(self, seconds: int) -> None:
+        """Turn plug on, wait, turn off."""
+        if not self.status():
+            self.on()
+            time.sleep(seconds)
+            self.off()
+
+    def on(self) -> bool:
+        """Try turn plug on, return plug status."""
+        try:
+            return self._status(self._send('Set', 'BinaryState', '1'))
+        except Exception:
+            return self.status()
+
+    def off(self) -> bool:
+        """Try turn plug off, return plug status."""
+        try:
+            return self._status(self._send('Set', 'BinaryState', '0'))
+        except Exception:
+            return self.status()
+
+    def status(self) -> bool:
+        """Get plug status."""
+        return self._status(self._send('Get', 'BinaryState'))
+
+    def identify(self) -> str:
+        """Get plug name."""
+        if self._query_identify():
+            self._cache_identify(self._send('Get', 'FriendlyName'))
+        return self._name
+
+    def rename(self, name: str) -> str:
+        """Update plug name."""
+        self._cache_identify(self._send('Change', 'FriendlyName', name))
+        return self._name
+
+    def _send(self, method: str, obj: str, param: str = '') -> str:
+        for port in self.ports:
+            try:
+                response = self._make_request(
+                    *self._request_params(
+                        method,
+                        obj,
+                        port,
+                        param
+                    )
+                )
+            except (httpx.ConnectError, httpx.HTTPStatusError):
+                pass
+            else:
+                return self._handle_response(response, obj)
+        raise Exception('ConnectionErrorAllPorts')
+
     def _make_request(self, url: str, headers: dict, data: str, timeout: int) -> httpx.Response:  # noqa:E501
         return httpx.post(
             url,
             headers=headers,
-            data=data,
+            content=data,
             timeout=timeout
         )
 
 
-class AsyncWemo(Wemo):
+class AsyncWemo(AbstractWemo):
     """Asyncio compatible instance of plug."""
 
     async def toggle(self) -> None:
@@ -182,7 +187,7 @@ class AsyncWemo(Wemo):
     async def on(self) -> bool:
         """Try turn plug on, return plug status."""
         try:
-            return self._status(await self._send('Set', 'BinaryState', 1))
+            return self._status(await self._send('Set', 'BinaryState', '1'))
         except Exception:
             return await self.status()
 
@@ -203,12 +208,12 @@ class AsyncWemo(Wemo):
             self._cache_identify(await self._send('Get', 'FriendlyName'))
         return self._name
 
-    async def rename(self, name: str) -> bool:
+    async def rename(self, name: str) -> str:
         """Update plug name."""
         self._cache_identify(await self._send('Change', 'FriendlyName', name))
         return self._name
 
-    async def _send(self, method: str, obj: str, param: str = None) -> str:
+    async def _send(self, method: str, obj: str, param: str = '') -> str:
         for port in self.ports:
             try:
                 response = await self._make_request(

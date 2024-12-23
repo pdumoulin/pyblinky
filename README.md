@@ -2,6 +2,14 @@
 
 Control Belkin brand Wemo smart plugs synchronously or asynchronously.
 
+## Install
+
+Install from [pypi.org](https://pypi.org/project/pyblinky/)
+
+```bash
+pip install pyblinky
+```
+
 
 ## Options
 
